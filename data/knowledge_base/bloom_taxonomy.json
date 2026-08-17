@@ -1,0 +1,46 @@
+{
+  "bloom_levels": [
+    {
+      "level": 1,
+      "name": "Remember",
+      "description": "Recall facts and basic concepts",
+      "verbs": ["define", "duplicate", "list", "memorize", "recall", "repeat", "state", "identify", "name", "recognize"],
+      "question_stems": ["What is...", "Define...", "List three...", "State the law of...", "Identify the component..."]
+    },
+    {
+      "level": 2,
+      "name": "Understand",
+      "description": "Explain ideas or concepts",
+      "verbs": ["classify", "describe", "discuss", "explain", "identify", "locate", "recognize", "report", "select", "translate", "paraphrase", "summarize"],
+      "question_stems": ["Explain how...", "Summarize the process of...", "Discuss the difference between...", "Describe in your own words..."]
+    },
+    {
+      "level": 3,
+      "name": "Apply",
+      "description": "Use information in new situations",
+      "verbs": ["execute", "implement", "solve", "use", "demonstrate", "interpret", "operate", "schedule", "sketch", "calculate", "apply"],
+      "question_stems": ["Solve the following problem...", "Calculate the...", "Apply the algorithm to...", "Demonstrate how to implement..."]
+    },
+    {
+      "level": 4,
+      "name": "Analyze",
+      "description": "Draw connections among ideas",
+      "verbs": ["differentiate", "organize", "relate", "compare", "contrast", "distinguish", "examine", "experiment", "question", "test", "deconstruct"],
+      "question_stems": ["Compare and contrast...", "Analyze the time complexity of...", "Distinguish between...", "What are the structural differences between..."]
+    },
+    {
+      "level": 5,
+      "name": "Evaluate",
+      "description": "Justify a stand or decision",
+      "verbs": ["appraise", "argue", "defend", "judge", "select", "support", "value", "critique", "weigh", "justify", "evaluate", "assess"],
+      "question_stems": ["Critique the design of...", "Justify why approach A is superior to approach B...", "Evaluate the security vulnerabilities in...", "Assess the trade-offs..."]
+    },
+    {
+      "level": 6,
+      "name": "Create",
+      "description": "Produce new or original work",
+      "verbs": ["design", "assemble", "construct", "conjecture", "develop", "formulate", "author", "investigate", "synthesize", "architect"],
+      "question_stems": ["Design a modular architecture for...", "Develop an algorithm that solves...", "Formulate a mathematical model for...", "Propose a novel scheme for..."]
+    }
+  ]
+}

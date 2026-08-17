@@ -1,0 +1,165 @@
+"""
+ADAPT — Assignment Generator Engine
+
+Generates structured assignments, assembles questions, and links AssignmentQuestion records.
+"""
+
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.ai.bloom_classifier import LLMBloomClassifier
+from app.ai.factory import get_llm_provider
+from app.ai.prompts.assignment_generation import (
+    ASSIGNMENT_GENERATION_SYSTEM_PROMPT,
+    ASSIGNMENT_GENERATION_USER_PROMPT,
+)
+from app.core.exceptions import LLMError, NotFoundError
+from app.core.logging import get_logger
+from app.models.assignment import Assignment, AssignmentQuestion
+from app.models.generation_run import GenerationRun
+from app.models.question import Question
+from app.models.subject import Subject
+from app.rag.context_assembler import ContextAssembler
+from app.rag.retriever import VectorRetriever
+from app.schemas.assignment import AssignmentGenerateRequest
+from app.schemas.question import QuestionBatchGenerationSchema
+
+logger = get_logger("ai.assignment_generator")
+
+
+class AssignmentGenerator:
+    """Generates structured assignments with balanced question marks."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.llm = get_llm_provider()
+        self.retriever = VectorRetriever(db)
+        self.bloom_classifier = LLMBloomClassifier()
+
+    async def generate_assignment(
+        self,
+        subject_id: UUID,
+        user_id: UUID,
+        request: AssignmentGenerateRequest,
+    ) -> Assignment:
+        # 1. Fetch Subject
+        s_res = await self.db.execute(select(Subject).where(Subject.id == subject_id))
+        subject = s_res.scalar_one_or_none()
+        if not subject:
+            raise NotFoundError("Subject", str(subject_id))
+
+        # 2. Retrieve Grounding Context
+        query_terms = [subject.name, request.title]
+        if request.units:
+            query_terms.append(f"Units {' '.join(str(u) for u in request.units)}")
+        chunks = await self.retriever.retrieve(
+            query=" ".join(query_terms),
+            subject_id=subject_id,
+            top_k=6,
+        )
+        context_str = ContextAssembler.assemble_context(chunks, max_characters=6000)
+
+        # 3. Prompt LLM
+        prompt = ASSIGNMENT_GENERATION_USER_PROMPT.format(
+            subject_name=subject.name,
+            title=request.title,
+            total_marks=request.total_marks,
+            num_questions=request.num_questions,
+            units_spec=f"Units {request.units}" if request.units else "All Units",
+            cos_spec=f"{request.cos}" if request.cos else "Target COs",
+            bloom_spec=f"{request.bloom_levels}" if request.bloom_levels else "Progressive (Understand to Apply/Analyze)",
+            difficulty=request.difficulty,
+            retrieved_context=context_str,
+        )
+
+        gen_run = GenerationRun(
+            subject_id=subject_id,
+            triggered_by=user_id,
+            operation="ASSIGNMENT_GENERATION",
+            model_used="gpt-4o",
+            input_params=request.model_dump(),
+            status="RUNNING",
+        )
+        self.db.add(gen_run)
+        await self.db.flush()
+
+        try:
+            batch_result = await self.llm.generate_structured(
+                prompt=prompt,
+                schema=QuestionBatchGenerationSchema,
+                system_prompt=ASSIGNMENT_GENERATION_SYSTEM_PROMPT,
+            )
+
+            # Create Assignment record
+            assignment = Assignment(
+                subject_id=subject_id,
+                generation_run_id=gen_run.id,
+                title=request.title,
+                description=request.description or f"Comprehensive assignment covering Units {request.units}",
+                total_marks=request.total_marks,
+                config=request.model_dump(),
+                status="DRAFT",
+                version=1,
+            )
+            self.db.add(assignment)
+            await self.db.flush()
+            await self.db.refresh(assignment)
+
+            # Store questions & link to assignment
+            total_actual_marks = 0
+            for idx, item in enumerate(batch_result.questions, 1):
+                bloom_res = await self.bloom_classifier.classify(item.question_text)
+                q_marks = item.marks or (request.total_marks // request.num_questions)
+                total_actual_marks += q_marks
+
+                q_obj = Question(
+                    subject_id=subject_id,
+                    generation_run_id=gen_run.id,
+                    question_text=item.question_text,
+                    question_type=item.question_type or "DESCRIPTIVE",
+                    marks=q_marks,
+                    difficulty=item.difficulty or request.difficulty,
+                    bloom_level=bloom_res.level,
+                    bloom_confidence=bloom_res.confidence,
+                    co_code=item.co_code,
+                    unit_number=item.unit_number or (request.units[0] if request.units else 1),
+                    topic=item.topic,
+                    reference_answer=item.reference_answer,
+                    marking_scheme=item.marking_scheme,
+                    status="DRAFT",
+                )
+                self.db.add(q_obj)
+                await self.db.flush()
+                await self.db.refresh(q_obj)
+
+                # Link
+                aq = AssignmentQuestion(
+                    assignment_id=assignment.id,
+                    question_id=q_obj.id,
+                    sequence_order=idx,
+                    marks=q_marks,
+                )
+                self.db.add(aq)
+
+            # Check mark validation
+            val_report = {
+                "total_marks_expected": request.total_marks,
+                "total_marks_actual": total_actual_marks,
+                "marks_balanced": total_actual_marks == request.total_marks,
+                "question_count": len(batch_result.questions),
+            }
+            assignment.validation_report = val_report
+
+            gen_run.status = "COMPLETED"
+            gen_run.validation_result = val_report
+            await self.db.commit()
+            return assignment
+
+        except Exception as e:
+            gen_run.status = "FAILED"
+            gen_run.error_message = str(e)
+            await self.db.commit()
+            logger.error(f"Assignment generation failed: {e}")
+            raise LLMError(f"Failed to generate assignment: {str(e)}")
