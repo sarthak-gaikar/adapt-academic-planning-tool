@@ -79,8 +79,8 @@ class IngestionPipeline:
 
             extracted_text = parse_result["full_text"]
             doc.extracted_text = extracted_text
-            doc.metadata = {
-                **(doc.metadata or {}),
+            doc.metadata_ = {
+                **(doc.metadata_ or {}),
                 "page_count": parse_result.get("page_count", 1),
                 "title": parse_result.get("title", doc.filename),
             }
@@ -122,12 +122,12 @@ class IngestionPipeline:
                     unit_number=chunk.unit_number,
                     topic=chunk.topic,
                     content=chunk.content,
-                    embedding=emb,
-                    metadata=chunk.metadata,
+                    metadata_=chunk.metadata,
                     source=doc.filename,
                     chunk_index=idx,
                     total_chunks=total_chunks,
                 )
+                v_chunk.embedding = emb
                 self.db.add(v_chunk)
 
             await self.db.flush()

@@ -56,9 +56,9 @@ class Settings(BaseSettings):
 
     # ---- Embedding Provider ----
     embedding_provider: str = "gemini"  # "gemini" or "openai"
-    gemini_embedding_model: str = "text-embedding-004"
+    gemini_embedding_model: str = "gemini-embedding-2"
     openai_embedding_model: str = "text-embedding-3-small"
-    embedding_dimension: int = 768  # 768 for text-embedding-004, 1536 for OpenAI
+    embedding_dimension: int = 768  # 768 for gemini-embedding-2, 1536 for OpenAI
 
     # ---- File Storage ----
     upload_dir: str = "./uploads"

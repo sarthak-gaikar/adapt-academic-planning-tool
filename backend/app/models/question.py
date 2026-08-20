@@ -8,8 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, JSON, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -19,13 +18,13 @@ class Question(Base):
     __tablename__ = "questions"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     subject_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
+        Uuid(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
     )
     generation_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("generation_runs.id"), nullable=True
+        Uuid(as_uuid=True), ForeignKey("generation_runs.id"), nullable=True
     )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     question_type: Mapped[str] = mapped_column(
@@ -53,7 +52,7 @@ class Question(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     academic_year: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     approved_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

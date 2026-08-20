@@ -7,8 +7,7 @@ Key-value config store for institution settings, exam rules, AAP templates, etc.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import DateTime, String, Text, JSON, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,7 +17,7 @@ class InstitutionConfig(Base):
     __tablename__ = "institution_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     key: Mapped[str] = mapped_column(
         String(100), unique=True, nullable=False, index=True

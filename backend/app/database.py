@@ -1,7 +1,7 @@
 """
 ADAPT — Database Engine & Session Management
 
-Async SQLAlchemy setup with pgvector extension support.
+Async SQLAlchemy setup for local SQLite database.
 """
 
 from sqlalchemy.ext.asyncio import (
@@ -15,12 +15,20 @@ from app.config import get_settings
 
 settings = get_settings()
 
+# SQLite doesn't support pool_size/max_overflow, so conditionally set engine args
+_engine_kwargs = {
+    "echo": settings.debug,
+}
+if "sqlite" not in settings.database_url:
+    _engine_kwargs.update({
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_pre_ping": True,
+    })
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
+    **_engine_kwargs,
 )
 
 async_session_factory = async_sessionmaker(
@@ -49,12 +57,6 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Create tables (works seamlessly for SQLite and PostgreSQL)."""
+    """Create all tables in the database."""
     async with engine.begin() as conn:
-        if "postgresql" in settings.database_url:
-            try:
-                from sqlalchemy import text
-                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            except Exception:
-                pass
         await conn.run_sync(Base.metadata.create_all)

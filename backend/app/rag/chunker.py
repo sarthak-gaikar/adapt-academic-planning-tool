@@ -40,7 +40,7 @@ class SyllabusChunker:
         # Step 1: Detect Unit sections using Regex
         # Matches e.g. "Unit 1", "UNIT - I", "Module 2:", "CHAPTER 3"
         unit_pattern = re.compile(
-            r"(?i)(?:^|\n)(?:unit|module|chapter)\s*([0-9IVXLCDM]+)[\s:\-\.]*(.*?)(?=\n(?:unit|module|chapter)\s*[0-9IVXLCDM]+|\Z)",
+            r"(?i)(?:^|\n)\s*(?:unit|module|chapter)\s*([0-9IVXLCDM]+)[\s:\-\.]*(.*?)(?=\n\s*(?:unit|module|chapter)\s*[0-9IVXLCDM]+|\Z)",
             re.DOTALL
         )
 

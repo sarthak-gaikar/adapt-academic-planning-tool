@@ -8,8 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, String, JSON, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -19,13 +18,13 @@ class AAPPlan(Base):
     __tablename__ = "aap_plans"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     subject_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
+        Uuid(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
     )
     generation_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("generation_runs.id"), nullable=True
+        Uuid(as_uuid=True), ForeignKey("generation_runs.id"), nullable=True
     )
     template_config: Mapped[dict] = mapped_column(
         JSON, nullable=True, default=dict
@@ -43,7 +42,7 @@ class AAPPlan(Base):
         JSON, nullable=True, default=dict
     )
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     approved_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

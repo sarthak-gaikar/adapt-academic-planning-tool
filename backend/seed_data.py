@@ -42,6 +42,8 @@ async def seed():
 
         # 2. Seed Program Outcomes
         po_path = Path("data/knowledge_base/program_outcomes.json")
+        if not po_path.exists():
+            po_path = Path("../data/knowledge_base/program_outcomes.json")
         if po_path.exists():
             with open(po_path, "r", encoding="utf-8") as f:
                 pos_data = json.load(f)

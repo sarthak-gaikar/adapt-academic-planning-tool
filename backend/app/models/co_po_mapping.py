@@ -8,8 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -19,16 +18,16 @@ class COPOMapping(Base):
     __tablename__ = "co_po_mappings"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     subject_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
+        Uuid(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
     )
     co_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("course_outcomes.id"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("course_outcomes.id"), nullable=False
     )
     po_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("program_outcomes.id"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("program_outcomes.id"), nullable=False
     )
     suggested_level: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
@@ -42,7 +41,7 @@ class COPOMapping(Base):
     )  # DRAFT | APPROVED
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     approved_by: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+        Uuid(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
