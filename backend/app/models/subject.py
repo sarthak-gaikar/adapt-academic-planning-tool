@@ -50,6 +50,9 @@ class Subject(Base):
     course_outcomes = relationship(
         "CourseOutcome", back_populates="subject", lazy="selectin"
     )
+    learning_outcomes = relationship(
+        "LearningOutcome", back_populates="subject", lazy="selectin"
+    )
     co_po_mappings = relationship(
         "COPOMapping", back_populates="subject", lazy="selectin"
     )

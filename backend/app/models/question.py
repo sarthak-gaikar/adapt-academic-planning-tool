@@ -39,6 +39,9 @@ class Question(Base):
     )  # Remember | Understand | Apply | Analyze | Evaluate | Create
     bloom_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     co_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    lo_code: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    pi_code: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    po_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     unit_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     topic: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     reference_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

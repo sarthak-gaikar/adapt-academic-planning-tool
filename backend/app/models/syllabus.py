@@ -78,6 +78,11 @@ class SyllabusUnit(Base):
         lazy="selectin",
         order_by="Topic.sequence_order",
     )
+    learning_outcomes = relationship(
+        "LearningOutcome",
+        back_populates="unit",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return f"<SyllabusUnit {self.unit_number}: {self.title}>"

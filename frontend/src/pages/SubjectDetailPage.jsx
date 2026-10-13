@@ -13,11 +13,17 @@ import {
   ArrowLeft,
   GraduationCap,
   Sparkles,
+  GitBranch,
+  Network,
 } from 'lucide-react';
 import api from '../services/api';
 import { SyllabusTab } from '../components/syllabus/SyllabusTab';
 import { CourseOutcomesTab } from '../components/outcomes/CourseOutcomesTab';
+import { LearningOutcomesTab } from '../components/outcomes/LearningOutcomesTab';
 import { COPOMappingTab } from '../components/outcomes/COPOMappingTab';
+import { COLOMappingTab } from '../components/mapping/COLOMappingTab';
+import { LOPIMappingTab } from '../components/mapping/LOPIMappingTab';
+import { OBEMatrixTab } from '../components/mapping/OBEMatrixTab';
 import { AAPTab } from '../components/aap/AAPTab';
 import { QuestionBankTab } from '../components/questions/QuestionBankTab';
 import { AssignmentsTab } from '../components/assignments/AssignmentsTab';
@@ -64,13 +70,17 @@ export const SubjectDetailPage = () => {
   const tabs = [
     { id: 'syllabus', label: '1. Syllabus & RAG', icon: BookOpen },
     { id: 'outcomes', label: '2. Course Outcomes', icon: Layers },
-    { id: 'copo', label: '3. CO-PO Matrix', icon: Table },
-    { id: 'aap', label: '4. Academic Plan (AAP)', icon: Calendar },
-    { id: 'questions', label: '5. Question Bank', icon: HelpCircle },
-    { id: 'assignments', label: '6. Assignments', icon: FileText },
-    { id: 'exams', label: '7. MSE & ESE Exams', icon: FileCheck2 },
-    { id: 'export', label: '8. Export DOCX', icon: Download },
-    { id: 'agent', label: 'AI Agent Console', icon: Bot },
+    { id: 'los', label: '3. Learning Outcomes', icon: GraduationCap },
+    { id: 'colo', label: '4. CO-LO Matrix', icon: GitBranch },
+    { id: 'lopi', label: '5. LO-PI Matrix', icon: Network },
+    { id: 'copo', label: '6. CO-PO Matrix', icon: Table },
+    { id: 'obe', label: '7. OBE Matrix', icon: Sparkles },
+    { id: 'aap', label: '8. Academic Plan', icon: Calendar },
+    { id: 'questions', label: '9. Question Bank', icon: HelpCircle },
+    { id: 'assignments', label: '10. Assignments', icon: FileText },
+    { id: 'exams', label: '11. MSE & ESE', icon: FileCheck2 },
+    { id: 'export', label: '12. Export', icon: Download },
+    { id: 'agent', label: 'AI Agent', icon: Bot },
   ];
 
   return (
@@ -122,7 +132,11 @@ export const SubjectDetailPage = () => {
       <div className="min-h-[500px]">
         {activeTab === 'syllabus' && <SyllabusTab subject={subject} onSyllabusUpdated={fetchSubject} />}
         {activeTab === 'outcomes' && <CourseOutcomesTab subject={subject} />}
+        {activeTab === 'los' && <LearningOutcomesTab subject={subject} />}
+        {activeTab === 'colo' && <COLOMappingTab subject={subject} />}
+        {activeTab === 'lopi' && <LOPIMappingTab subject={subject} />}
         {activeTab === 'copo' && <COPOMappingTab subject={subject} />}
+        {activeTab === 'obe' && <OBEMatrixTab subject={subject} />}
         {activeTab === 'aap' && <AAPTab subject={subject} />}
         {activeTab === 'questions' && <QuestionBankTab subject={subject} />}
         {activeTab === 'assignments' && <AssignmentsTab subject={subject} />}

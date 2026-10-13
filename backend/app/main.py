@@ -44,6 +44,17 @@ async def lifespan(app: FastAPI):
     from app.core.background_tasks import get_task_manager
     get_task_manager()
 
+    # Ingest system knowledge base (idempotent — skips unchanged files)
+    try:
+        from app.database import async_session_factory as _kb_session_factory
+        from app.rag.system_knowledge import SystemKnowledgeManager
+        async with _kb_session_factory() as kb_session:
+            kb_mgr = SystemKnowledgeManager(kb_session)
+            kb_summary = await kb_mgr.ingest_all_system_documents()
+            logger.info(f"System KB: {kb_summary['ingested']} ingested, {kb_summary['skipped']} skipped")
+    except Exception as e:
+        logger.warning(f"System KB ingestion skipped or failed: {e}")
+
     yield
 
     logger.info(f"Shutting down {settings.app_name}")
@@ -100,24 +111,35 @@ def create_app() -> FastAPI:
     from app.api.auth import router as auth_router
     from app.api.bloom import router as bloom_router
     from app.api.blueprints import router as blueprints_router
+    from app.api.co_lo import router as co_lo_router
     from app.api.co_po import router as co_po_router
     from app.api.course_outcomes import router as course_outcomes_router
     from app.api.documents import router as documents_router
     from app.api.exams import router as exams_router
     from app.api.export import router as export_router
+    from app.api.learning_outcomes import router as learning_outcomes_router
+    from app.api.lo_pi import router as lo_pi_router
+    from app.api.obe_matrix import router as obe_matrix_router
+    from app.api.performance_indicators import router as performance_indicators_router
     from app.api.program_outcomes import router as program_outcomes_router
     from app.api.questions import router as questions_router
     from app.api.subjects import router as subjects_router
     from app.api.syllabus import router as syllabus_router
     from app.api.tasks import router as tasks_router
+    from app.api.upload_temp import router as upload_temp_router
 
     app.include_router(auth_router)
     app.include_router(subjects_router)
     app.include_router(documents_router)
     app.include_router(syllabus_router)
     app.include_router(course_outcomes_router)
+    app.include_router(learning_outcomes_router)
     app.include_router(program_outcomes_router)
+    app.include_router(performance_indicators_router)
+    app.include_router(co_lo_router)
+    app.include_router(lo_pi_router)
     app.include_router(co_po_router)
+    app.include_router(obe_matrix_router)
     app.include_router(aap_router)
     app.include_router(questions_router)
     app.include_router(assignments_router)
@@ -128,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(export_router)
     app.include_router(agent_router)
     app.include_router(tasks_router)
+    app.include_router(upload_temp_router)
 
     # ---- Health Check ----
     @app.get("/api/health", tags=["Health"])
@@ -137,6 +160,17 @@ def create_app() -> FastAPI:
             "app": settings.app_name,
             "env": settings.app_env,
         }
+
+    # ---- System Knowledge Status ----
+    @app.get("/api/system/knowledge-base", tags=["System"])
+    async def system_knowledge_status(
+        db=__import__("fastapi").Depends(__import__("app.database", fromlist=["get_db"]).get_db)
+    ):
+        """Returns status of all ingested system/institutional knowledge base documents."""
+        from app.rag.system_knowledge import SystemKnowledgeManager
+        mgr = SystemKnowledgeManager(db)
+        statuses = await mgr.get_ingestion_status()
+        return {"system_documents": statuses, "count": len(statuses)}
 
     return app
 
