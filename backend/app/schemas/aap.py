@@ -14,6 +14,7 @@ class AAPRowSchema(BaseModel):
     topics_covered: List[str] = Field(default_factory=list, description="Specific topics/subtopics planned")
     teaching_method: str = Field(..., description="Chalk & Board, Interactive PPT, Lab Demonstration, Case Study, etc.")
     co_mapped: str = Field(..., description="Target CO (e.g. CO1, CO2)")
+    lo_mapped: List[str] = Field(default_factory=list, description="Target LOs (e.g. ['LO1.1', 'LO1.2'])")
     planned_hours: int = Field(..., ge=1, le=10, description="Contact/lecture hours for this week")
     activity_type: str = Field("Lecture", description="Lecture | Tutorial | Quiz | Lab Session | Discussion")
 
@@ -25,10 +26,21 @@ class AAPPlanDataSchema(BaseModel):
     weeks: List[AAPRowSchema] = Field(default_factory=list)
 
 
+class AAPTemplateConfig(BaseModel):
+    """Configurable AAP template settings."""
+    include_tutorials: bool = Field(True, description="Include tutorial sessions")
+    include_labs: bool = Field(False, description="Include lab sessions")
+    include_quizzes: bool = Field(True, description="Schedule periodic quizzes")
+    mse_week: Optional[int] = Field(8, description="Mid-semester exam week")
+    ese_week: Optional[int] = Field(16, description="End-semester exam week")
+    assignment_weeks: List[int] = Field(default_factory=lambda: [4, 10], description="Assignment submission weeks")
+    custom_columns: List[str] = Field(default_factory=list, description="Additional columns for the AAP template")
+
+
 class AAPGenerationRequest(BaseModel):
     total_weeks: Optional[int] = Field(15, description="Number of instructional weeks in semester")
     hours_per_week: Optional[int] = Field(3, description="Standard lecture hours per week")
-    template_config: Optional[Dict[str, Any]] = None
+    template_config: Optional[AAPTemplateConfig] = None
 
 
 # ---- API Responses ----

@@ -2,6 +2,10 @@
 ADAPT — AAP Generator Engine
 
 Generates semester-long Academic Activity Plans and runs deterministic constraint validation.
+
+The institutional AAP Format document is retrieved from the system RAG knowledge base
+and used as context. The actual output structure is enforced by the structured template
+(AAPPlanDataSchema) — RAG provides style/format awareness, not free-form output.
 """
 
 from typing import Any, Dict, List, Optional
@@ -21,18 +25,41 @@ from app.models.course_outcome import CourseOutcome
 from app.models.generation_run import GenerationRun
 from app.models.subject import Subject
 from app.models.syllabus import Syllabus
+from app.rag.context_assembler import ContextAssembler
+from app.rag.retriever import VectorRetriever
 from app.schemas.aap import AAPGenerationRequest, AAPPlanDataSchema
 from app.validators.aap_validator import AAPValidator
 
 logger = get_logger("ai.aap_generator")
 
+# Augmented system prompt with instruction to use retrieved AAP format
+AAP_SYSTEM_PROMPT_WITH_RAG = AAP_GENERATION_SYSTEM_PROMPT + """
+
+You have been provided with the institution's official AAP Format document.
+Use it to understand the expected column structure, terminology, and formatting conventions.
+The output MUST follow the institution's AAP structure — do not invent a different format.
+"""
+
+# Augmented user prompt that injects AAP format context
+AAP_USER_PROMPT_WITH_RAG = """=== INSTITUTIONAL AAP FORMAT REFERENCE ===
+{aap_format_context}
+=== END AAP FORMAT ===
+
+""" + AAP_GENERATION_USER_PROMPT
+
 
 class AAPGenerator:
-    """Generates and validates Academic Activity Plans."""
+    """Generates and validates Academic Activity Plans.
+    
+    Retrieves the institutional AAP Format from system RAG knowledge base to use
+    as authoritative context. The actual output structure is enforced by
+    AAPPlanDataSchema — the schema is the template; RAG provides style awareness.
+    """
 
     def __init__(self, db: AsyncSession):
         self.db = db
         self.llm = get_llm_provider()
+        self.retriever = VectorRetriever(db)
 
     async def generate_aap(
         self,
@@ -82,11 +109,37 @@ class AAPGenerator:
         cos_summary = "\n".join([f"- {co.co_code}: {co.statement}" for co in cos]) or "CO1 to CO5"
         valid_cos = [co.co_code for co in cos] or ["CO1", "CO2", "CO3", "CO4", "CO5"]
 
+        # 4. Retrieve AAP Format from system RAG knowledge base
+        aap_format_context = "No institutional AAP format document available in knowledge base."
+        aap_chunks_retrieved = []
+        try:
+            query = f"AAP academic activity plan format template weekly schedule {subject.name}"
+            aap_chunks = await self.retriever.retrieve_system(
+                query=query,
+                document_types=["AAP_FORMAT"],
+                top_k=5,
+                min_score=0.0,
+            )
+            if aap_chunks:
+                aap_format_context = ContextAssembler.assemble_context(
+                    aap_chunks, max_characters=4000
+                )
+                aap_chunks_retrieved = aap_chunks
+                logger.info(
+                    f"AAP generator: Retrieved {len(aap_chunks)} AAP format chunks "
+                    f"(max score: {max(c.score for c in aap_chunks):.3f})"
+                )
+            else:
+                logger.warning("AAP generator: No AAP format chunks found in system KB")
+        except Exception as e:
+            logger.warning(f"AAP generator: Could not retrieve AAP format: {e}")
+
         req = request or AAPGenerationRequest()
         total_weeks = req.total_weeks or 15
         total_hours = subject.teaching_hours or (total_weeks * (req.hours_per_week or 3))
 
-        prompt = AAP_GENERATION_USER_PROMPT.format(
+        # Use augmented prompt with RAG context if available
+        base_user_prompt = AAP_GENERATION_USER_PROMPT.format(
             subject_name=subject.name,
             course_code=subject.course_code or "N/A",
             total_weeks=total_weeks,
@@ -96,11 +149,25 @@ class AAPGenerator:
             cos_summary=cos_summary,
         )
 
+        if aap_chunks_retrieved:
+            # Prepend AAP format context to user prompt
+            prompt = f"=== INSTITUTIONAL AAP FORMAT REFERENCE ===\n{aap_format_context}\n=== END AAP FORMAT ===\n\n{base_user_prompt}"
+            system_prompt = AAP_SYSTEM_PROMPT_WITH_RAG
+        else:
+            prompt = base_user_prompt
+            system_prompt = AAP_GENERATION_SYSTEM_PROMPT
+
         gen_run = GenerationRun(
             subject_id=subject_id,
             triggered_by=user_id,
             operation="AAP_GENERATION",
-            model_used="gpt-4o",
+            model_used="gemini-2.5-flash",
+            input_params={
+                "total_weeks": total_weeks,
+                "total_hours": total_hours,
+                "aap_format_chunks_retrieved": len(aap_chunks_retrieved),
+            },
+            retrieved_documents=[str(c.chunk_id) for c in aap_chunks_retrieved],
             status="RUNNING",
         )
         self.db.add(gen_run)
@@ -110,10 +177,10 @@ class AAPGenerator:
             plan_data = await self.llm.generate_structured(
                 prompt=prompt,
                 schema=AAPPlanDataSchema,
-                system_prompt=AAP_GENERATION_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
             )
 
-            # 4. Run Deterministic Validation
+            # 5. Run Deterministic Validation (template enforces structure)
             val_report = AAPValidator.validate(
                 plan=plan_data,
                 expected_total_hours=total_hours,
