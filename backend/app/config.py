@@ -42,17 +42,23 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 480
 
     # ---- LLM Provider ----
-    llm_provider: str = "gemini"  # "gemini" or "openai"
+    llm_provider: str = "groq"  # "gemini", "openai", or "groq"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     gemini_temperature: float = 0.3
     gemini_max_tokens: int = 8192
 
-    # OpenAI (optional fallback)
+    # OpenAI (optional)
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
     openai_temperature: float = 0.3
     openai_max_tokens: int = 4096
+
+    # Groq
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_temperature: float = 0.3
+    groq_max_tokens: int = 8192
 
     # ---- Embedding Provider ----
     embedding_provider: str = "gemini"  # "gemini" or "openai"

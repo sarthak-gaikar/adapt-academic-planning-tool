@@ -1,7 +1,8 @@
 """
 ADAPT — AI Factory
 
-Provides singleton access to configured LLM and Embedding providers (Google Gemini / OpenAI).
+Provides singleton access to configured LLM and Embedding providers
+(Google Gemini / OpenAI / Groq).
 """
 
 from functools import lru_cache
@@ -9,6 +10,7 @@ from typing import Optional
 
 from app.ai.gemini_embeddings import GeminiEmbeddingProvider
 from app.ai.gemini_provider import GeminiProvider
+from app.ai.groq_provider import GroqProvider
 from app.ai.llm_provider import EmbeddingProvider, LLMProvider
 from app.ai.openai_embeddings import OpenAIEmbeddingProvider
 from app.ai.openai_provider import OpenAIProvider
@@ -19,15 +21,17 @@ from app.config import get_settings
 def get_llm_provider() -> LLMProvider:
     """Factory method to get the configured LLM provider instance."""
     settings = get_settings()
-    provider_name = (settings.llm_provider or "gemini").lower()
+    provider_name = (settings.llm_provider or "groq").lower()
 
     if provider_name == "gemini":
         return GeminiProvider()
     elif provider_name == "openai":
         return OpenAIProvider()
+    elif provider_name == "groq":
+        return GroqProvider()
 
-    # Default to Gemini
-    return GeminiProvider()
+    # Default to Groq
+    return GroqProvider()
 
 
 @lru_cache()
