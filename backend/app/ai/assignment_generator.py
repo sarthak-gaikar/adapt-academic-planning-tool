@@ -23,8 +23,7 @@ from app.models.question import Question
 from app.models.subject import Subject
 from app.rag.context_assembler import ContextAssembler
 from app.rag.retriever import VectorRetriever
-from app.schemas.assignment import AssignmentGenerateRequest
-from app.schemas.question import QuestionBatchGenerationSchema
+from app.schemas.assignment import AssignmentGenerateRequest, AssignmentGenerationSchema
 
 logger = get_logger("ai.assignment_generator")
 
@@ -50,8 +49,29 @@ class AssignmentGenerator:
         if not subject:
             raise NotFoundError("Subject", str(subject_id))
 
-        # 2. Retrieve Grounding Context
-        query_terms = [subject.name, request.title]
+        # 2. Derive Marks & Question Counts
+        total_marks = request.calculated_total_marks
+        num_questions = request.calculated_total_questions
+        counts_dict = request.question_counts_int
+
+        if counts_dict:
+            breakdown_lines = [
+                f"- {count} question(s) of {marks} marks each ({count * marks} marks)"
+                for marks, count in sorted(counts_dict.items())
+            ]
+            breakdown_spec = "\n".join(breakdown_lines)
+        else:
+            breakdown_spec = f"- {num_questions} questions totaling {total_marks} marks"
+
+        if request.title and request.title.strip():
+            title_instruction = f"- Preferred Title (you may refine): {request.title.strip()}"
+        else:
+            title_instruction = "- Assignment Title: Choose an engaging, descriptive, academic title summarizing the questions and topics generated (e.g. 'Assignment: Text Classification and Language Models')."
+
+        # 3. Retrieve Grounding Context
+        query_terms = [subject.name]
+        if request.title:
+            query_terms.append(request.title)
         if request.units:
             query_terms.append(f"Units {' '.join(str(u) for u in request.units)}")
         chunks = await self.retriever.retrieve(
@@ -61,12 +81,13 @@ class AssignmentGenerator:
         )
         context_str = ContextAssembler.assemble_context(chunks, max_characters=6000)
 
-        # 3. Prompt LLM
+        # 4. Prompt LLM
         prompt = ASSIGNMENT_GENERATION_USER_PROMPT.format(
             subject_name=subject.name,
-            title=request.title,
-            total_marks=request.total_marks,
-            num_questions=request.num_questions,
+            total_marks=total_marks,
+            num_questions=num_questions,
+            breakdown_spec=breakdown_spec,
+            title_instruction=title_instruction,
             units_spec=f"Units {request.units}" if request.units else "All Units",
             cos_spec=f"{request.cos}" if request.cos else "Target COs",
             bloom_spec=f"{request.bloom_levels}" if request.bloom_levels else "Progressive (Understand to Apply/Analyze)",
@@ -78,7 +99,7 @@ class AssignmentGenerator:
             subject_id=subject_id,
             triggered_by=user_id,
             operation="ASSIGNMENT_GENERATION",
-            model_used="gpt-4o",
+            model_used="gemini-2.5-flash",
             input_params=request.model_dump(),
             status="RUNNING",
         )
@@ -88,17 +109,33 @@ class AssignmentGenerator:
         try:
             batch_result = await self.llm.generate_structured(
                 prompt=prompt,
-                schema=QuestionBatchGenerationSchema,
+                schema=AssignmentGenerationSchema,
                 system_prompt=ASSIGNMENT_GENERATION_SYSTEM_PROMPT,
+            )
+
+            # Determine title chosen by LLM or fallback
+            generated_title = (batch_result.title or "").strip()
+            if not generated_title or generated_title.lower() in ["assignment", "untitled", "assignment 1"]:
+                if request.title and request.title.strip():
+                    final_title = request.title.strip()
+                else:
+                    unit_str = f" (Units {', '.join(str(u) for u in request.units)})" if request.units else ""
+                    final_title = f"{subject.name} Assignment{unit_str}"
+            else:
+                final_title = generated_title
+
+            final_desc = batch_result.description or request.description or (
+                f"Assignment for {subject.name} covering Units {request.units} ({total_marks} Marks)"
+                if request.units else f"Assignment for {subject.name} ({total_marks} Marks)"
             )
 
             # Create Assignment record
             assignment = Assignment(
                 subject_id=subject_id,
                 generation_run_id=gen_run.id,
-                title=request.title,
-                description=request.description or f"Comprehensive assignment covering Units {request.units}",
-                total_marks=request.total_marks,
+                title=final_title,
+                description=final_desc,
+                total_marks=total_marks,
                 config=request.model_dump(),
                 status="DRAFT",
                 version=1,
@@ -111,7 +148,7 @@ class AssignmentGenerator:
             total_actual_marks = 0
             for idx, item in enumerate(batch_result.questions, 1):
                 bloom_res = await self.bloom_classifier.classify(item.question_text)
-                q_marks = item.marks or (request.total_marks // request.num_questions)
+                q_marks = item.marks or (total_marks // max(1, num_questions))
                 total_actual_marks += q_marks
 
                 q_obj = Question(
@@ -145,10 +182,11 @@ class AssignmentGenerator:
 
             # Check mark validation
             val_report = {
-                "total_marks_expected": request.total_marks,
+                "total_marks_expected": total_marks,
                 "total_marks_actual": total_actual_marks,
-                "marks_balanced": total_actual_marks == request.total_marks,
+                "marks_balanced": total_actual_marks == total_marks,
                 "question_count": len(batch_result.questions),
+                "title_generated_by_llm": bool(generated_title),
             }
             assignment.validation_report = val_report
 

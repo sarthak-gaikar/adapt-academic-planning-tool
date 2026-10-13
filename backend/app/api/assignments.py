@@ -54,9 +54,24 @@ async def generate_assignment_endpoint(
     if not res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Subject not found")
 
+    # If question_counts provided and total_marks was also provided, ensure consistency
+    counts = req.question_counts_int
+    if counts and req.total_marks is not None and req.total_marks != req.calculated_total_marks:
+        calc = req.calculated_total_marks
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "BLUEPRINT_MISMATCH",
+                "message": f"Requested marks ({req.total_marks}M) do not match sum of question counts ({calc}M).",
+                "requested_total": req.total_marks,
+                "calculated_total": calc,
+            },
+        )
+
+    task_title = req.title or f"Assignment ({req.calculated_total_marks} Marks)"
     task_mgr = get_task_manager()
     task_id = task_mgr.submit(
-        f"Generate Assignment '{req.title}'",
+        f"Generate {task_title}",
         _run_bg_assignment_gen,
         subject_id,
         current_user.id,

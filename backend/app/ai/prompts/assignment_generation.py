@@ -7,20 +7,25 @@ Your task is to generate a cohesive set of questions matching the exact marks bu
 
 Rules:
 1. Ensure the sum of marks across all questions strictly equals the total_marks requested.
-2. Formulate practical, thought-provoking questions that test real understanding and application.
-3. Every question must have an accurate reference answer and a marking scheme.
+2. The number and mark value of questions must strictly match the Question Breakdown requested (e.g. exactly N questions of 2 marks, M questions of 5 marks, etc.).
+3. Choose a professional, descriptive, and academic title for the assignment based on the questions and concepts covered.
+4. Formulate practical, thought-provoking questions that test real understanding and application.
+5. Every question must have an accurate reference answer and a marking scheme.
 """
 
 ASSIGNMENT_GENERATION_USER_PROMPT = """Create an Assignment for course: {subject_name}
 
 Specifications:
-- Assignment Title: {title}
 - Total Marks: {total_marks} marks
-- Number of Questions: {num_questions}
+- Total Questions: {num_questions}
+- Question Breakdown by Marks:
+{breakdown_spec}
 - Units to Cover: {units_spec}
 - Target COs: {cos_spec}
 - Target Bloom Levels: {bloom_spec}
 - Difficulty: {difficulty}
+
+{title_instruction}
 
 Retrieved Grounding Context:
 {retrieved_context}
