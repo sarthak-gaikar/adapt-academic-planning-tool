@@ -1,20 +1,327 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Search,
-  Filter,
   CheckCircle2,
   Trash2,
   ChevronDown,
   ChevronUp,
   BookOpen,
   Plus,
-  HelpCircle,
-  Award,
+  X,
+  Upload,
+  FileUp,
+  Calculator,
+  AlertTriangle,
+  Zap,
+  Clock,
 } from 'lucide-react';
 import api from '../../services/api';
 import { TaskProgressModal } from '../common/TaskProgressModal';
 
+// ─────────────────────────────────────────────
+// Blueprint Question Bank Generation Modal
+// ─────────────────────────────────────────────
+const GenerateQBModal = ({ subject, onClose, onTaskStarted }) => {
+  const fileInputRef = useRef(null);
+
+  // Unit selection
+  const availableUnits = [1, 2, 3, 4, 5];
+  const [selectedUnits, setSelectedUnits] = useState([1, 2, 3]);
+
+  // Mark configs: 2M, 5M, 10M
+  const [markCounts, setMarkCounts] = useState({ 2: 10, 5: 5, 10: 2 });
+
+  // Optional files
+  const [additionalFiles, setAdditionalFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Calculated totals
+  const totalMarks = Object.entries(markCounts).reduce(
+    (sum, [marks, count]) => sum + parseInt(marks) * count,
+    0
+  );
+  const totalQuestions = Object.values(markCounts).reduce((sum, c) => sum + c, 0);
+
+  const toggleUnit = (unit) => {
+    setSelectedUnits((prev) =>
+      prev.includes(unit) ? prev.filter((u) => u !== unit) : [...prev, unit].sort((a, b) => a - b)
+    );
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    setAdditionalFiles((prev) => [...prev, ...files]);
+  };
+
+  const removeFile = (idx) => {
+    setAdditionalFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const uploadFiles = async () => {
+    if (!additionalFiles.length) return [];
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      additionalFiles.forEach((f) => fd.append('files', f));
+      const res = await api.post('/upload/temp', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data.file_paths || [];
+    } catch (err) {
+      alert('File upload failed: ' + (err.response?.data?.detail || err.message));
+      return [];
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (selectedUnits.length === 0) {
+      alert('Please select at least one unit.');
+      return;
+    }
+    if (totalQuestions === 0) {
+      alert('Please configure at least one question.');
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      let filePaths = [];
+      if (additionalFiles.length > 0) {
+        filePaths = await uploadFiles();
+      }
+
+      const markConfigsArr = Object.entries(markCounts)
+        .filter(([, count]) => count > 0)
+        .map(([marks, count]) => ({ marks: parseInt(marks), count }));
+
+      const payload = {
+        units: selectedUnits,
+        mark_configs: markConfigsArr,
+        additional_file_paths: filePaths,
+        difficulty: 'MIXED',
+      };
+
+      const res = await api.post(`/subjects/${subject.id}/question-bank/generate`, payload);
+      onTaskStarted(res.data.task_id);
+      onClose();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.response?.data?.message || 'Generation failed.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between rounded-t-3xl">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-brand-500/10 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-brand-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Generate Question Bank</h3>
+              <p className="text-xs text-slate-400">Configure units &amp; blueprint</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Unit Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+              Units to Generate From
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {availableUnits.map((unit) => {
+                const selected = selectedUnits.includes(unit);
+                return (
+                  <button
+                    key={unit}
+                    onClick={() => toggleUnit(unit)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                      selected
+                        ? 'bg-brand-500/10 border-brand-500/50 text-brand-400'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                        selected ? 'bg-brand-500 border-brand-500' : 'border-slate-600'
+                      }`}
+                    >
+                      {selected && <CheckCircle2 className="w-2.5 h-2.5 text-white" />}
+                    </span>
+                    Unit {unit}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedUnits.length === 0 && (
+              <p className="text-xs text-red-400 mt-1">Select at least one unit.</p>
+            )}
+            {selectedUnits.length > 1 && (
+              <p className="text-xs text-slate-500 mt-1">
+                Questions will be distributed across {selectedUnits.length} units.
+              </p>
+            )}
+          </div>
+
+          {/* Question Blueprint */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+              Question Blueprint
+            </label>
+            <div className="bg-slate-950/60 rounded-2xl p-4 border border-slate-800 space-y-3">
+              {[
+                { marks: 2, label: '2-Mark Questions (Short Answer)' },
+                { marks: 5, label: '5-Mark Questions (Descriptive)' },
+                { marks: 10, label: '10-Mark Questions (Long Answer)' },
+              ].map(({ marks, label }) => (
+                <div key={marks} className="flex items-center justify-between gap-3">
+                  <label className="text-xs text-slate-300 flex-1">{label}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={markCounts[marks]}
+                      onChange={(e) =>
+                        setMarkCounts((prev) => ({ ...prev, [marks]: Math.max(0, parseInt(e.target.value) || 0) }))
+                      }
+                      className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-center text-white focus:outline-none focus:border-brand-500"
+                    />
+                    <span className="text-xs text-slate-500 font-mono w-16 text-right">
+                      = {marks * markCounts[marks]}M
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Summary */}
+              <div className="pt-3 mt-1 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs font-semibold text-slate-300">Calculated Total</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-bold font-mono text-brand-400">{totalMarks}M</span>
+                    <span className="text-xs text-slate-500 font-mono ml-2">/ {totalQuestions} Qs</span>
+                  </div>
+                </div>
+
+                {/* Breakdown */}
+                {totalMarks > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {Object.entries(markCounts)
+                      .filter(([, c]) => c > 0)
+                      .map(([marks, count]) => (
+                        <div key={marks} className="flex justify-between text-[11px] text-slate-500 font-mono">
+                          <span>{count} × {marks}M</span>
+                          <span>= {parseInt(marks) * count}M</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Optional Additional Files */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase tracking-wider">
+              Additional Reference Files{' '}
+              <span className="text-slate-500 font-normal normal-case">(Optional)</span>
+            </label>
+            <p className="text-xs text-slate-500 mb-2">
+              Upload previous papers, notes, or material for this generation only. Not added to permanent knowledge base.
+            </p>
+
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border border-dashed border-slate-700 rounded-2xl p-4 text-center cursor-pointer hover:border-brand-500/50 hover:bg-brand-500/5 transition group"
+            >
+              <FileUp className="w-6 h-6 text-slate-500 group-hover:text-brand-400 mx-auto mb-1.5 transition" />
+              <p className="text-xs text-slate-400 group-hover:text-slate-300">
+                Click to browse PDF / DOCX files
+              </p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.doc"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {additionalFiles.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {additionalFiles.map((file, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between bg-slate-800/60 rounded-xl px-3 py-2 text-xs"
+                  >
+                    <span className="text-slate-300 truncate max-w-[280px]">{file.name}</span>
+                    <button
+                      onClick={() => removeFile(idx)}
+                      className="ml-2 text-slate-500 hover:text-red-400 transition shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={selectedUnits.length === 0 || totalQuestions === 0 || generating || uploading}
+              className="inline-flex items-center gap-2 px-5 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-brand-500/20"
+            >
+              {generating || uploading ? (
+                <>
+                  <Clock className="w-4 h-4 animate-spin" />
+                  {uploading ? 'Uploading...' : 'Starting...'}
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Generate {totalQuestions} Questions ({totalMarks}M)
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// Main QuestionBankTab Component
+// ─────────────────────────────────────────────
 export const QuestionBankTab = ({ subject }) => {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,17 +334,6 @@ export const QuestionBankTab = ({ subject }) => {
   const [bloomFilter, setBloomFilter] = useState('');
   const [diffFilter, setDiffFilter] = useState('');
   const [search, setSearch] = useState('');
-
-  // Generation form
-  const [genForm, setGenForm] = useState({
-    unit_number: 1,
-    topic: '',
-    difficulty: 'MEDIUM',
-    bloom_level: 'Apply',
-    marks: 5,
-    question_type: 'DESCRIPTIVE',
-    count: 3,
-  });
 
   const fetchQuestions = async () => {
     try {
@@ -59,17 +355,6 @@ export const QuestionBankTab = ({ subject }) => {
   useEffect(() => {
     fetchQuestions();
   }, [subject.id, unitFilter, bloomFilter, diffFilter, search]);
-
-  const handleGenerate = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await api.post(`/subjects/${subject.id}/questions/generate`, genForm);
-      setShowGenModal(false);
-      setTaskId(res.data.task_id);
-    } catch (err) {
-      alert(err.response?.data?.detail || 'Generation failed');
-    }
-  };
 
   const handleApprove = async (qid) => {
     try {
@@ -112,6 +397,7 @@ export const QuestionBankTab = ({ subject }) => {
           <h2 className="text-xl font-bold text-white mt-2">Subject Question Bank</h2>
           <p className="text-xs text-slate-400 mt-1 max-w-xl">
             Syllabus-grounded, duplicate-checked questions with model answers and step marking schemes.
+            Select specific units and configure marks blueprint before generating.
           </p>
         </div>
 
@@ -179,7 +465,7 @@ export const QuestionBankTab = ({ subject }) => {
           <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-white">No Questions in Bank</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 mb-5">
-            Generate your first batch of AI-curated questions for this subject.
+            Generate your first batch of AI-curated questions by selecting units and configuring a marks blueprint.
           </p>
           <button
             onClick={() => setShowGenModal(true)}
@@ -293,125 +579,16 @@ export const QuestionBankTab = ({ subject }) => {
         </div>
       )}
 
-      {/* Generate Questions Modal */}
+      {/* Generate Modal */}
       {showGenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-1">Generate Questions with AI</h3>
-            <p className="text-xs text-slate-400 mb-5">Configure specifications for RAG grounded question creation</p>
-
-            <form onSubmit={handleGenerate} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Unit Number</label>
-                  <select
-                    value={genForm.unit_number}
-                    onChange={(e) => setGenForm({ ...genForm, unit_number: parseInt(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  >
-                    {[1, 2, 3, 4, 5].map((u) => (
-                      <option key={u} value={u}>Unit {u}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Question Count</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={genForm.count}
-                    onChange={(e) => setGenForm({ ...genForm, count: parseInt(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Bloom Cognitive Level</label>
-                  <select
-                    value={genForm.bloom_level}
-                    onChange={(e) => setGenForm({ ...genForm, bloom_level: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  >
-                    {['Remember', 'Understand', 'Apply', 'Analyze', 'Evaluate', 'Create'].map((b) => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Difficulty</label>
-                  <select
-                    value={genForm.difficulty}
-                    onChange={(e) => setGenForm({ ...genForm, difficulty: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  >
-                    <option value="EASY">EASY</option>
-                    <option value="MEDIUM">MEDIUM</option>
-                    <option value="HARD">HARD</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Marks per Question</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={genForm.marks}
-                    onChange={(e) => setGenForm({ ...genForm, marks: parseInt(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Question Type</label>
-                  <select
-                    value={genForm.question_type}
-                    onChange={(e) => setGenForm({ ...genForm, question_type: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                  >
-                    <option value="DESCRIPTIVE">DESCRIPTIVE</option>
-                    <option value="SHORT">SHORT</option>
-                    <option value="LONG">LONG</option>
-                    <option value="NUMERICAL">NUMERICAL</option>
-                    <option value="CODING">CODING</option>
-                    <option value="MCQ">MCQ</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Specific Topic Focus (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. POS Tagging, Word Embeddings, Transformers"
-                  value={genForm.topic}
-                  onChange={(e) => setGenForm({ ...genForm, topic: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowGenModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-brand-500/20"
-                >
-                  Generate
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <GenerateQBModal
+          subject={subject}
+          onClose={() => setShowGenModal(false)}
+          onTaskStarted={(tid) => {
+            setTaskId(tid);
+            setShowGenModal(false);
+          }}
+        />
       )}
 
       <TaskProgressModal

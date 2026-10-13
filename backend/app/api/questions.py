@@ -29,6 +29,10 @@ from app.schemas.question import (
     QuestionResponse,
     QuestionUpdate,
 )
+from app.schemas.question_bank_blueprint import (
+    QuestionBankBlueprintRequest,
+    BlueprintPreviewResponse,
+)
 
 router = APIRouter(tags=["Question Bank"])
 
@@ -182,3 +186,60 @@ async def archive_question(
 
     q.status = "ARCHIVED"
     await db.commit()
+
+
+async def _run_bg_blueprint_gen(task_info, subject_id: UUID, user_id: UUID, req: QuestionBankBlueprintRequest):
+    async with async_session_factory() as session:
+        generator = QuestionGenerator(session)
+        questions = await generator.generate_from_blueprint(subject_id, user_id, req)
+        return {"questions_generated": len(questions), "total_marks": req.total_marks}
+
+
+@router.post("/api/subjects/{subject_id}/question-bank/generate", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def generate_question_bank_from_blueprint(
+    subject_id: UUID,
+    req: QuestionBankBlueprintRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a structured question bank from a marks × count blueprint.
+    
+    The system auto-calculates total marks from the mark configs.
+    Example: [{marks: 2, count: 10}, {marks: 5, count: 5}] → 45 total marks, 15 questions.
+    """
+    res = await db.execute(select(Subject).where(Subject.id == subject_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    task_mgr = get_task_manager()
+    task_id = task_mgr.submit(
+        f"Generate question bank ({req.total_questions} Qs, {req.total_marks}m) for subject {subject_id}",
+        _run_bg_blueprint_gen,
+        subject_id,
+        current_user.id,
+        req,
+    )
+    return {
+        "task_id": task_id,
+        "message": f"Question bank generation started: {req.total_questions} questions, {req.total_marks} total marks.",
+        "preview": {
+            "total_questions": req.total_questions,
+            "total_marks": req.total_marks,
+            "mark_breakdown": [{"marks": mc.marks, "count": mc.count, "subtotal": mc.marks * mc.count} for mc in req.mark_configs],
+        },
+    }
+
+
+@router.post("/api/subjects/{subject_id}/question-bank/preview", response_model=BlueprintPreviewResponse)
+async def preview_question_bank_blueprint(
+    subject_id: UUID,
+    req: QuestionBankBlueprintRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Preview calculated marks before generating."""
+    return BlueprintPreviewResponse(
+        mark_configs=req.mark_configs,
+        total_marks=req.total_marks,
+        total_questions=req.total_questions,
+        units=req.units,
+    )

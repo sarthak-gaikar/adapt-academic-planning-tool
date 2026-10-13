@@ -15,6 +15,9 @@ class QuestionGeneratedItem(BaseModel):
     difficulty: str = Field("MEDIUM", description="EASY | MEDIUM | HARD")
     bloom_level: str = Field("Understand", description="Bloom level")
     co_code: Optional[str] = Field(None, description="Mapped CO code (e.g. CO1)")
+    lo_code: Optional[str] = Field(None, description="Mapped LO code (e.g. LO1.1)")
+    pi_code: Optional[str] = Field(None, description="Mapped PI code (e.g. PI1.1)")
+    po_code: Optional[str] = Field(None, description="Mapped PO code (e.g. PO1)")
     unit_number: Optional[int] = Field(None, description="Target syllabus unit")
     topic: Optional[str] = Field(None, description="Target syllabus topic")
     reference_answer: Optional[str] = Field(None, description="Concise model answer")
@@ -50,6 +53,9 @@ class QuestionResponse(BaseModel):
     bloom_level: Optional[str] = None
     bloom_confidence: Optional[float] = None
     co_code: Optional[str] = None
+    lo_code: Optional[str] = None
+    pi_code: Optional[str] = None
+    po_code: Optional[str] = None
     unit_number: Optional[int] = None
     topic: Optional[str] = None
     reference_answer: Optional[str] = None
@@ -72,6 +78,9 @@ class QuestionUpdate(BaseModel):
     difficulty: Optional[str] = None
     bloom_level: Optional[str] = None
     co_code: Optional[str] = None
+    lo_code: Optional[str] = None
+    pi_code: Optional[str] = None
+    po_code: Optional[str] = None
     unit_number: Optional[int] = None
     topic: Optional[str] = None
     reference_answer: Optional[str] = None

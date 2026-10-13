@@ -3,6 +3,12 @@ ADAPT — Question Generator Engine
 
 Generates grounded questions using RAG, classifies Bloom levels,
 checks duplicates against the existing question bank, and stores metadata.
+
+Blueprint generation supports:
+  - Multi-unit selection (faculty picks specific units)
+  - Marks × count configuration (2M, 5M, 10M)
+  - Request-scoped optional files (additional reference material)
+  - RAG-grounded context from syllabus and approved question bank
 """
 
 from typing import Any, Dict, List, Optional
@@ -22,6 +28,7 @@ from app.models.generation_run import GenerationRun
 from app.models.question import Question
 from app.models.subject import Subject
 from app.rag.context_assembler import ContextAssembler
+from app.rag.request_documents import RequestDocumentManager
 from app.rag.retriever import VectorRetriever
 from app.schemas.question import (
     QuestionBatchGenerationSchema,
@@ -46,6 +53,7 @@ class QuestionGenerator:
         subject_id: UUID,
         user_id: UUID,
         request: QuestionGenerateRequest,
+        generation_run_id: Optional[str] = None,
     ) -> List[Question]:
         # 1. Fetch Subject
         s_res = await self.db.execute(select(Subject).where(Subject.id == subject_id))
@@ -53,7 +61,7 @@ class QuestionGenerator:
         if not subject:
             raise NotFoundError("Subject", str(subject_id))
 
-        # 2. Retrieve relevant context via RAG
+        # 2. Retrieve relevant context via RAG (subject syllabus + optional request scope)
         query_parts = [subject.name]
         if request.topic:
             query_parts.append(request.topic)
@@ -67,7 +75,18 @@ class QuestionGenerator:
             unit_number=request.unit_number,
             top_k=5,
         )
-        context_str = ContextAssembler.assemble_context(chunks, max_characters=6000)
+
+        # Also retrieve request-scoped optional files if provided
+        request_chunks = []
+        if generation_run_id:
+            request_chunks = await self.retriever.retrieve_request_scoped(
+                query=query_str,
+                generation_run_id=generation_run_id,
+                top_k=3,
+            )
+
+        all_chunks = chunks + request_chunks
+        context_str = ContextAssembler.assemble_context(all_chunks, max_characters=6000)
 
         # 3. Prompt LLM
         prompt = QUESTION_GENERATION_USER_PROMPT.format(
@@ -88,9 +107,9 @@ class QuestionGenerator:
             subject_id=subject_id,
             triggered_by=user_id,
             operation="QUESTION_GENERATION",
-            model_used="gpt-4o",
+            model_used="gemini-2.5-flash",
             input_params=request.model_dump(),
-            retrieved_documents=[str(c.chunk_id) for c in chunks],
+            retrieved_documents=[str(c.chunk_id) for c in all_chunks],
             status="RUNNING",
         )
         self.db.add(gen_run)
@@ -136,7 +155,7 @@ class QuestionGenerator:
                     topic=item.topic or request.topic,
                     reference_answer=item.reference_answer,
                     marking_scheme=item.marking_scheme,
-                    source_context={"retrieved_chunk_count": len(chunks), "similarity_score": dup_result.similarity_score},
+                    source_context={"retrieved_chunk_count": len(all_chunks), "similarity_score": dup_result.similarity_score},
                     status="DRAFT",
                     version=1,
                 )
@@ -154,3 +173,126 @@ class QuestionGenerator:
             await self.db.commit()
             logger.error(f"Question generation failed: {e}")
             raise LLMError(f"Failed to generate questions: {str(e)}")
+
+    async def generate_from_blueprint(
+        self,
+        subject_id: UUID,
+        user_id: UUID,
+        blueprint,  # QuestionBankBlueprintRequest
+    ) -> List[Question]:
+        """Generate questions from a structured marks × count blueprint.
+        
+        Supports:
+        - Multi-unit selection: questions distributed across selected units
+        - Request-scoped optional files: ingested before generation
+        - Marks × count configs: 2M, 5M, 10M question types
+        - Duplicate detection across all generated questions
+        
+        Example: units=[1,3], mark_configs=[{marks:2, count:10}, {marks:5, count:5}]
+        → 10 questions × 2M + 5 questions × 5M = 45 marks total
+        """
+        # Step A: Create top-level generation run for this blueprint session
+        gen_run_master = GenerationRun(
+            subject_id=subject_id,
+            triggered_by=user_id,
+            operation="QUESTION_BANK_BLUEPRINT",
+            model_used="gemini-2.5-flash",
+            input_params={
+                "units": blueprint.units,
+                "mark_configs": [{"marks": mc.marks, "count": mc.count} for mc in blueprint.mark_configs],
+                "total_marks": blueprint.total_marks,
+                "total_questions": blueprint.total_questions,
+                "has_additional_files": bool(getattr(blueprint, "additional_file_paths", [])),
+            },
+            status="RUNNING",
+        )
+        self.db.add(gen_run_master)
+        await self.db.flush()
+        await self.db.refresh(gen_run_master)
+
+        # Step B: Ingest request-scoped optional files if provided
+        generation_run_id = str(gen_run_master.id)
+        additional_file_paths = getattr(blueprint, "additional_file_paths", [])
+        if additional_file_paths:
+            req_doc_mgr = RequestDocumentManager(self.db)
+            ingest_result = await req_doc_mgr.ingest_request_files(
+                file_paths=additional_file_paths,
+                generation_run_id=generation_run_id,
+                subject_id=subject_id,
+            )
+            logger.info(
+                f"QB Blueprint: Ingested {ingest_result['total_chunks']} chunks "
+                f"from {len(additional_file_paths)} optional file(s)"
+            )
+
+        all_questions: List[Question] = []
+
+        # Step C: Determine unit distribution across mark configs
+        units = blueprint.units if blueprint.units else []
+        n_units = len(units) if units else 1
+
+        for mc in blueprint.mark_configs:
+            # Determine question type from mark level
+            if mc.marks <= 2:
+                q_type = "SHORT"
+            elif mc.marks <= 5:
+                q_type = "DESCRIPTIVE"
+            else:
+                q_type = "LONG"
+
+            if units and n_units > 1:
+                # Distribute questions across selected units
+                questions_per_unit = mc.count // n_units
+                remainder = mc.count % n_units
+
+                for unit_idx, unit_num in enumerate(units):
+                    unit_count = questions_per_unit + (1 if unit_idx < remainder else 0)
+                    if unit_count == 0:
+                        continue
+
+                    req = QuestionGenerateRequest(
+                        unit_number=unit_num,
+                        co_code=blueprint.cos[0] if len(blueprint.cos) == 1 else None,
+                        bloom_level=blueprint.bloom_levels[0] if len(blueprint.bloom_levels) == 1 else None,
+                        difficulty=blueprint.difficulty if blueprint.difficulty != "MIXED" else "MEDIUM",
+                        marks=mc.marks,
+                        question_type=q_type,
+                        count=unit_count,
+                        custom_guidelines=blueprint.custom_guidelines,
+                    )
+                    batch = await self.generate_questions(
+                        subject_id, user_id, req,
+                        generation_run_id=generation_run_id if additional_file_paths else None,
+                    )
+                    all_questions.extend(batch)
+            else:
+                # Single unit or no unit filter
+                single_unit = units[0] if units else None
+                req = QuestionGenerateRequest(
+                    unit_number=single_unit,
+                    co_code=blueprint.cos[0] if len(blueprint.cos) == 1 else None,
+                    bloom_level=blueprint.bloom_levels[0] if len(blueprint.bloom_levels) == 1 else None,
+                    difficulty=blueprint.difficulty if blueprint.difficulty != "MIXED" else "MEDIUM",
+                    marks=mc.marks,
+                    question_type=q_type,
+                    count=mc.count,
+                    custom_guidelines=blueprint.custom_guidelines,
+                )
+                batch = await self.generate_questions(
+                    subject_id, user_id, req,
+                    generation_run_id=generation_run_id if additional_file_paths else None,
+                )
+                all_questions.extend(batch)
+
+        gen_run_master.status = "COMPLETED"
+        gen_run_master.input_params = {
+            **gen_run_master.input_params,
+            "questions_generated": len(all_questions),
+        }
+        await self.db.commit()
+
+        logger.info(
+            f"QB Blueprint complete: {len(all_questions)} questions generated "
+            f"({blueprint.total_marks} total marks, units={units})"
+        )
+        return all_questions

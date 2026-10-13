@@ -1,12 +1,14 @@
 """
 ADAPT — Examination Papers API
 
-POST /api/subjects/{id}/mse/generate — Generate Mid-Semester Exam
-POST /api/subjects/{id}/ese/generate — Generate End-Semester Exam
-GET  /api/subjects/{id}/exams        — List exam papers
-GET  /api/exams/{eid}                — Get exam paper with questions
-POST /api/exams/{eid}/validate       — Re-run deterministic validation
-POST /api/exams/{eid}/approve        — Officially approve exam paper
+POST /api/subjects/{id}/papers/generate  — Unified Generate Paper (MSE or ESE)
+POST /api/subjects/{id}/mse/generate     — Generate Mid-Semester Exam (legacy)
+POST /api/subjects/{id}/ese/generate     — Generate End-Semester Exam (legacy)
+GET  /api/subjects/{id}/exams            — List exam papers
+GET  /api/exams/{eid}                    — Get exam paper with questions
+POST /api/exams/{eid}/validate           — Re-run deterministic validation
+POST /api/exams/{eid}/approve            — Officially approve exam paper
+POST /api/subjects/{id}/papers/preview   — Preview blueprint validation
 """
 
 from datetime import datetime, timezone
@@ -19,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.ese_generator import ESEGenerator
 from app.ai.mse_generator import MSEGenerator
+from app.ai.exam_generator import UnifiedExamGenerator
 from app.api.deps import get_current_user
 from app.core.background_tasks import get_task_manager
 from app.database import async_session_factory, get_db
@@ -30,11 +33,32 @@ from app.schemas.exam import (
     ExamGenerateRequest,
     ExamPaperResponse,
     ExamQuestionItem,
+    UnifiedPaperGenerateRequest,
 )
 from app.schemas.question import QuestionResponse
 from app.validators.blueprint_validator import MasterBlueprintValidator
 
 router = APIRouter(tags=["Examinations"])
+
+
+async def _run_bg_unified_gen(
+    task_info, subject_id, user_id, exam_type, unit_ids,
+    total_marks, question_counts, additional_file_paths, title, instructions,
+):
+    async with async_session_factory() as session:
+        gen = UnifiedExamGenerator(session)
+        paper = await gen.generate_paper(
+            subject_id=subject_id,
+            user_id=user_id,
+            exam_type=exam_type,
+            unit_ids=unit_ids,
+            total_marks=total_marks,
+            question_counts=question_counts,
+            additional_file_paths=additional_file_paths or [],
+            custom_title=title,
+            custom_instructions=instructions,
+        )
+        return {"paper_id": str(paper.id), "title": paper.title, "exam_type": exam_type}
 
 
 async def _run_bg_mse_gen(task_info, subject_id: UUID, blueprint_id: UUID, user_id: UUID, title: str, instructions: str):
@@ -51,6 +75,102 @@ async def _run_bg_ese_gen(task_info, subject_id: UUID, blueprint_id: UUID, user_
         return {"paper_id": str(paper.id), "title": paper.title}
 
 
+# ---- Unified Generate Paper ----
+
+@router.post("/api/subjects/{subject_id}/papers/generate", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def generate_paper_unified(
+    subject_id: UUID,
+    req: UnifiedPaperGenerateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Unified paper generation endpoint for both MSE and ESE.
+    
+    Pre-validates blueprint arithmetic BEFORE dispatching to background generation.
+    Returns 422 with clear error if marks don't add up.
+    """
+    # Validate paper type
+    if req.paper_type not in ("MSE", "ESE"):
+        raise HTTPException(status_code=422, detail="paper_type must be 'MSE' or 'ESE'")
+
+    # Validate subject exists
+    res = await db.execute(select(Subject).where(Subject.id == subject_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    # Pre-validate marks arithmetic (BLOCK if mismatch)
+    question_counts_int = req.question_counts_int
+    is_valid, calc_total, msg = MasterBlueprintValidator.validate_generation_request(
+        total_marks=req.total_marks,
+        question_counts=question_counts_int,
+    )
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "BLUEPRINT_MISMATCH",
+                "message": msg,
+                "requested_total": req.total_marks,
+                "calculated_total": calc_total,
+                "question_counts": req.question_counts,
+            },
+        )
+
+    task_mgr = get_task_manager()
+    task_id = task_mgr.submit(
+        f"Generate {req.paper_type} Paper ({req.total_marks}m) for {subject_id}",
+        _run_bg_unified_gen,
+        subject_id,
+        current_user.id,
+        req.paper_type,
+        req.unit_ids,
+        req.total_marks,
+        question_counts_int,
+        req.additional_file_paths,
+        req.custom_title,
+        req.custom_instructions,
+    )
+    return {
+        "task_id": task_id,
+        "message": f"{req.paper_type} paper generation started.",
+        "blueprint_validation": msg,
+        "calculated_marks": calc_total,
+        "total_questions": req.total_questions,
+    }
+
+
+@router.post("/api/subjects/{subject_id}/papers/preview", response_model=dict)
+async def preview_paper_blueprint(
+    subject_id: UUID,
+    req: UnifiedPaperGenerateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Preview blueprint validation without generating. Shows calculated marks and validity."""
+    question_counts_int = req.question_counts_int
+    is_valid, calc_total, msg = MasterBlueprintValidator.validate_generation_request(
+        total_marks=req.total_marks,
+        question_counts=question_counts_int,
+    )
+    breakdown = [
+        {"marks": int(k), "count": v, "subtotal": int(k) * v}
+        for k, v in req.question_counts.items()
+    ]
+    return {
+        "is_valid": is_valid,
+        "message": msg,
+        "requested_total": req.total_marks,
+        "calculated_total": calc_total,
+        "total_questions": req.total_questions,
+        "breakdown": breakdown,
+        "paper_type": req.paper_type,
+        "units": req.unit_ids,
+    }
+
+
+# ---- Legacy MSE/ESE endpoints (backward compatible) ----
+
 @router.post("/api/subjects/{subject_id}/mse/generate", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
 async def generate_mse_endpoint(
     subject_id: UUID,
@@ -58,7 +178,7 @@ async def generate_mse_endpoint(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger background generation of MSE paper from blueprint."""
+    """Trigger background generation of MSE paper from blueprint. (Legacy — use /papers/generate)"""
     req = req or ExamGenerateRequest()
     bp_id = req.blueprint_id
 

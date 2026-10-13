@@ -137,6 +137,54 @@ class BloomDistributionValidator:
 Tuple_Check = tuple  # (name, passed, message, is_warning)
 
 
+class LOCoverageValidator:
+    """Validates that questions cover the expected Learning Outcomes."""
+
+    @staticmethod
+    def validate(
+        questions: List[Dict[str, Any]],
+        expected_lo_codes: Optional[List[str]] = None,
+    ) -> List[Tuple_Check]:
+        checks = []
+        covered_los = set(q.get("lo_code") for q in questions if q.get("lo_code"))
+
+        if expected_lo_codes:
+            missing_los = set(expected_lo_codes) - covered_los
+            if not missing_los:
+                checks.append(("LO Coverage", True, f"All {len(expected_lo_codes)} expected LOs are covered.", False))
+            else:
+                checks.append(("LO Coverage", False, f"Missing LOs: {sorted(list(missing_los))}. Only {len(covered_los)} of {len(expected_lo_codes)} covered.", True))
+        elif covered_los:
+            checks.append(("LO Coverage", True, f"Questions cover {len(covered_los)} distinct Learning Outcomes.", False))
+        else:
+            checks.append(("LO Coverage", True, "No LO metadata on questions. Consider mapping questions to LOs.", True))
+
+        return checks
+
+
+class MarkConfigValidator:
+    """Validates mark configs arithmetic consistency."""
+
+    @staticmethod
+    def validate(
+        mark_configs: List[Dict[str, Any]],
+        expected_total: int,
+    ) -> List[Tuple_Check]:
+        checks = []
+        if not mark_configs:
+            return checks
+
+        calc_total = sum(mc.get("marks", 0) * mc.get("count", 0) for mc in mark_configs)
+        calc_questions = sum(mc.get("count", 0) for mc in mark_configs)
+
+        if calc_total == expected_total:
+            checks.append(("Mark Config Arithmetic", True, f"Mark configs sum to {calc_total}m with {calc_questions} questions — matches expected total.", False))
+        else:
+            checks.append(("Mark Config Arithmetic", False, f"Mark configs sum to {calc_total}m but blueprint expects {expected_total}m.", False))
+
+        return checks
+
+
 class MasterBlueprintValidator:
     """Master validator assembling all deterministic checks."""
 
@@ -146,6 +194,8 @@ class MasterBlueprintValidator:
         total_marks: int,
         units_covered: List[int],
         target_bloom: Optional[Dict[str, int]] = None,
+        expected_lo_codes: Optional[List[str]] = None,
+        mark_configs: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         report = ExamValidationReport()
 
@@ -161,7 +211,16 @@ class MasterBlueprintValidator:
         for name, passed, msg, is_warn in BloomDistributionValidator.validate(questions, target_bloom):
             report.add(name, passed, msg, is_warn)
 
-        # 4. Question Count & Duplicate checks
+        # 4. LO Coverage
+        for name, passed, msg, is_warn in LOCoverageValidator.validate(questions, expected_lo_codes):
+            report.add(name, passed, msg, is_warn)
+
+        # 5. Mark Config Arithmetic
+        if mark_configs:
+            for name, passed, msg, is_warn in MarkConfigValidator.validate(mark_configs, total_marks):
+                report.add(name, passed, msg, is_warn)
+
+        # 6. Duplicate checks
         q_texts = [q.get("question_text", "").strip() for q in questions]
         if len(q_texts) == len(set(q_texts)):
             report.add("Duplicate Question Check", True, "No duplicate questions detected in exam paper.", False)
@@ -169,3 +228,47 @@ class MasterBlueprintValidator:
             report.add("Duplicate Question Check", False, "Duplicate questions detected within the exam paper!", False)
 
         return report.to_dict()
+
+    @staticmethod
+    def validate_generation_request(
+        total_marks: int,
+        question_counts: Dict[int, int],
+    ) -> tuple:
+        """
+        Pre-generation validation of marks arithmetic.
+        
+        BLOCKS generation if configured question counts don't sum to requested total.
+        Must be called BEFORE the LLM — do NOT let the LLM fix arithmetic.
+        
+        Args:
+            total_marks: Faculty-requested total marks
+            question_counts: Dict of {marks_per_question: count}
+            
+        Returns:
+            (is_valid, calculated_total, message)
+        """
+        calculated = sum(marks * count for marks, count in question_counts.items())
+        total_questions = sum(question_counts.values())
+
+        if calculated == total_marks:
+            breakdown = ", ".join(
+                f"{count}×{marks}m={marks*count}"
+                for marks, count in sorted(question_counts.items())
+            )
+            return (
+                True,
+                calculated,
+                f"Blueprint valid: {breakdown} = {calculated}m ({total_questions} questions)",
+            )
+        else:
+            breakdown = ", ".join(
+                f"{count}×{marks}m={marks*count}"
+                for marks, count in sorted(question_counts.items())
+            )
+            return (
+                False,
+                calculated,
+                f"Marks mismatch: {breakdown} = {calculated}m but requested {total_marks}m. "
+                f"Please adjust question counts.",
+            )
+

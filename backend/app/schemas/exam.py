@@ -25,6 +25,13 @@ class SectionConfigSchema(BaseModel):
     has_internal_choice: bool = False
 
 
+class ExamMarkConfig(BaseModel):
+    """Marks × count config for exam sections."""
+    marks: int = Field(..., ge=1, le=50)
+    count: int = Field(..., ge=1, le=20)
+    question_type: str = Field("DESCRIPTIVE", description="MCQ | SHORT | LONG | DESCRIPTIVE")
+
+
 class BlueprintCreate(BaseModel):
     exam_type: str = Field("MSE", description="MSE | ESE")
     total_marks: int = Field(30, ge=10, le=150)
@@ -36,7 +43,9 @@ class BlueprintCreate(BaseModel):
         default_factory=lambda: {"Remember": 10, "Understand": 30, "Apply": 40, "Analyze": 20}
     )
     co_distribution: Dict[str, int] = Field(default_factory=dict)
+    lo_distribution: Dict[str, int] = Field(default_factory=dict, description="LO coverage percentages e.g. {'LO1.1': 20, 'LO2.1': 30}")
     section_structure: List[SectionConfigSchema] = Field(default_factory=list)
+    mark_configs: List[ExamMarkConfig] = Field(default_factory=list, description="Marks × count configs for structured question generation")
     has_internal_choice: bool = False
 
 
@@ -94,3 +103,35 @@ class ExamGenerateRequest(BaseModel):
     blueprint_id: Optional[UUID] = None
     custom_title: Optional[str] = None
     custom_instructions: Optional[str] = None
+
+
+class UnifiedPaperGenerateRequest(BaseModel):
+    """Request schema for the unified Generate Paper endpoint."""
+    paper_type: str = Field(..., description="MSE or ESE")
+    unit_ids: List[int] = Field(..., min_length=1, description="Selected unit numbers")
+    total_marks: int = Field(..., ge=10, le=150, description="Requested total marks")
+    question_counts: Dict[str, int] = Field(
+        ...,
+        description="Marks → count mapping, e.g. {'2': 5, '5': 2, '10': 1}"
+    )
+    additional_file_paths: List[str] = Field(
+        default_factory=list,
+        description="Paths to temporarily uploaded reference files (optional)"
+    )
+    custom_title: Optional[str] = None
+    custom_instructions: Optional[str] = None
+
+    @property
+    def question_counts_int(self) -> Dict[int, int]:
+        """Convert string keys to int keys."""
+        return {int(k): v for k, v in self.question_counts.items()}
+
+    @property
+    def calculated_marks(self) -> int:
+        """Auto-calculated total from question counts."""
+        return sum(int(k) * v for k, v in self.question_counts.items())
+
+    @property
+    def total_questions(self) -> int:
+        return sum(self.question_counts.values())
+
