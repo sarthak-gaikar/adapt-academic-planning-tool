@@ -3,6 +3,11 @@ ADAPT — VectorChunk Model
 
 Stores document chunks with embeddings for RAG retrieval.
 Embeddings are stored as JSON-serialized float lists for SQLite compatibility.
+
+Supports three source scopes:
+  SYSTEM  — Institutional knowledge (no subject_id, document_id nullable)
+  SUBJECT — Faculty-uploaded subject material (default, existing behavior)
+  REQUEST — Temporary generation-scoped context (tagged with generation_run_id)
 """
 
 import json
@@ -22,16 +27,26 @@ class VectorChunk(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("documents.id"), nullable=False, index=True
+    # Nullable: system chunks don't reference a user-uploaded Document
+    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("documents.id"), nullable=True, index=True
     )
-    subject_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("subjects.id"), nullable=False, index=True
+    # Nullable: system chunks are institution-wide, not subject-specific
+    subject_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("subjects.id"), nullable=True, index=True
     )
     syllabus_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     document_type: Mapped[str] = mapped_column(
         String(50), nullable=False
-    )  # SYLLABUS | NOTES | PREV_PAPER | REFERENCE | GUIDELINES
+    )  # SYLLABUS | NOTES | PREV_PAPER | REFERENCE | GUIDELINES | PO_PI_GUIDELINE | AAP_FORMAT | MSE_SAMPLE | ESE_SAMPLE
+    # Source scope for data isolation
+    source_scope: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, default="SUBJECT"
+    )  # SYSTEM | SUBJECT | REQUEST
+    # For REQUEST-scoped chunks: link to the generation run that created them
+    generation_run_id: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, index=True
+    )
     unit_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     topic: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -70,4 +85,5 @@ class VectorChunk(Base):
             self.embedding_json = None
 
     def __repr__(self) -> str:
-        return f"<VectorChunk {self.document_type} U{self.unit_number} #{self.chunk_index}>"
+        scope_tag = f" [{self.source_scope}]" if self.source_scope else ""
+        return f"<VectorChunk {self.document_type}{scope_tag} U{self.unit_number} #{self.chunk_index}>"

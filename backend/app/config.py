@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # ---- File Storage ----
     upload_dir: str = "./uploads"
     max_upload_size_mb: int = 50
+    knowledge_base_dir: str = "./knowledge_base/institutional"
 
     @property
     def max_upload_size_bytes(self) -> int:
