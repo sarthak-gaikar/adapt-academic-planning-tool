@@ -163,3 +163,85 @@ async def approve_all_mappings(
 
     await db.commit()
     return {"message": "CO-PO mapping approved successfully."}
+
+
+@router.get("/api/subjects/{subject_id}/co-po/derived", response_model=COPOMatrixResponse)
+async def get_derived_co_po_matrix(
+    subject_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Derive CO-PO correlations from the CO→LO→PI→PO chain.
+    
+    For each CO, traces through its mapped LOs → each LO's PI mappings → PI's parent PO.
+    The derived level for each CO-PO pair is the maximum mapping level found through the chain.
+    """
+    from app.models.learning_outcome import LearningOutcome
+    from app.models.lo_co_mapping import LOCOMapping
+    from app.models.lo_pi_mapping import LOPIMapping
+
+    # Fetch COs
+    co_res = await db.execute(
+        select(CourseOutcome)
+        .where(CourseOutcome.subject_id == subject_id, CourseOutcome.status.in_(["DRAFT", "APPROVED"]))
+        .order_by(CourseOutcome.co_code)
+    )
+    cos = co_res.scalars().all()
+
+    # Fetch LOs
+    lo_res = await db.execute(
+        select(LearningOutcome)
+        .where(LearningOutcome.subject_id == subject_id, LearningOutcome.status.in_(["DRAFT", "APPROVED"]))
+    )
+    los = lo_res.scalars().all()
+    lo_dict = {lo.id: lo for lo in los}
+
+    # Fetch CO-LO mappings
+    lo_ids = [lo.id for lo in los]
+    co_lo_map = {}  # co_id → [lo_id]
+    if lo_ids:
+        clm_res = await db.execute(select(LOCOMapping).where(LOCOMapping.lo_id.in_(lo_ids)))
+        for m in clm_res.scalars().all():
+            co_lo_map.setdefault(m.co_id, []).append(m.lo_id)
+
+    # Fetch LO-PI mappings
+    lo_pi_map = {}  # lo_id → [{po_code, level}]
+    if lo_ids:
+        lpm_res = await db.execute(select(LOPIMapping).where(LOPIMapping.lo_id.in_(lo_ids)))
+        for m in lpm_res.scalars().all():
+            po_code = m.program_outcome.po_code if m.program_outcome else ""
+            lo_pi_map.setdefault(m.lo_id, []).append({"po_code": po_code, "level": m.mapping_level})
+
+    # Fetch POs
+    po_res = await db.execute(
+        select(ProgramOutcome).where(ProgramOutcome.is_active == True).order_by(ProgramOutcome.po_code)
+    )
+    pos = po_res.scalars().all()
+    po_list = [po.po_code for po in pos]
+
+    # Derive CO-PO matrix
+    matrix = {}
+    co_list = []
+    for co in cos:
+        co_list.append(co.co_code)
+        mapped_lo_ids = co_lo_map.get(co.id, [])
+        po_levels = {}  # po_code → max level
+
+        for lo_id in mapped_lo_ids:
+            for pi_entry in lo_pi_map.get(lo_id, []):
+                po_code = pi_entry["po_code"]
+                level = pi_entry["level"]
+                po_levels[po_code] = max(po_levels.get(po_code, 0), level)
+
+        if po_levels:
+            matrix[co.co_code] = {
+                po_code: {"suggested": level, "approved": level, "rationale": "Derived from LO→PI→PO chain", "status": "DERIVED"}
+                for po_code, level in po_levels.items()
+            }
+
+    return COPOMatrixResponse(
+        subject_id=subject_id,
+        co_list=co_list,
+        po_list=po_list,
+        matrix=matrix,
+    )

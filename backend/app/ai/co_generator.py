@@ -2,6 +2,7 @@
 ADAPT — Course Outcome Generator Engine
 
 Grounded generation of OBE Course Outcomes using structured syllabus and RAG context.
+Enforces deterministic Bloom ordering after LLM generation.
 """
 
 import json
@@ -25,6 +26,7 @@ from app.models.syllabus import Syllabus, SyllabusUnit, Topic
 from app.rag.context_assembler import ContextAssembler
 from app.rag.retriever import VectorRetriever
 from app.schemas.course_outcome import COGenerationRequest, COGenerationResponseSchema
+from app.validators.bloom_order_validator import BloomOrderValidator, bloom_to_order
 
 logger = get_logger("ai.co_generator")
 
@@ -86,7 +88,7 @@ class COGenerator:
             teaching_hours=subject.teaching_hours or "N/A",
             syllabus_units_summary=units_summary,
             retrieved_context=context_str,
-            num_cos=req.num_cos or "5 to 6",
+            num_cos=req.num_cos or 6,
             additional_guidelines=f"Faculty Notes: {req.guidelines}" if req.guidelines else "",
         )
 
@@ -119,22 +121,49 @@ class COGenerator:
             for old_co in existing_cos.scalars().all():
                 old_co.status = "ARCHIVED"
 
-            # Create new CO records with Bloom classification verification
-            created_cos = []
+            # 5. Classify Bloom levels and build items for validation
+            co_items = []
             for item in structured_res.course_outcomes:
-                # Classify / verify cognitive level
                 bloom_res = await self.bloom_classifier.classify(item.statement)
+                co_items.append({
+                    "co_code": item.co_code,
+                    "statement": item.statement,
+                    "bloom_level": bloom_res.level,
+                    "bloom_order": bloom_res.level_number,
+                    "bloom_confidence": bloom_res.confidence,
+                    "bloom_model_used": bloom_res.model_used,
+                    "supporting_units": item.supporting_units,
+                    "rationale": item.rationale,
+                })
 
+            # 6. Deterministic Bloom Order Validation
+            validation_result = BloomOrderValidator.validate_cos(co_items)
+
+            if not validation_result.is_valid:
+                # Reorder COs to enforce increasing Bloom order
+                logger.info(
+                    f"CO Bloom ordering invalid ({validation_result.errors}). "
+                    f"Reordering deterministically."
+                )
+                co_items, reorder_result = BloomOrderValidator.reorder_cos(co_items)
+                # Update bloom_order after reordering
+                for item in co_items:
+                    item["bloom_order"] = bloom_to_order(item["bloom_level"])
+
+            # 7. Create CO records with validated ordering
+            created_cos = []
+            for item in co_items:
                 co = CourseOutcome(
                     subject_id=subject_id,
                     generation_run_id=gen_run.id,
-                    co_code=item.co_code,
-                    statement=item.statement,
-                    bloom_level=bloom_res.level,
-                    bloom_confidence=bloom_res.confidence,
-                    bloom_model_used=bloom_res.model_used,
-                    supporting_units=item.supporting_units,
-                    rationale=item.rationale,
+                    co_code=item["co_code"],
+                    statement=item["statement"],
+                    bloom_level=item["bloom_level"],
+                    bloom_order=item["bloom_order"],
+                    bloom_confidence=item["bloom_confidence"],
+                    bloom_model_used=item["bloom_model_used"],
+                    supporting_units=item["supporting_units"],
+                    rationale=item["rationale"],
                     status="DRAFT",
                     version=1,
                 )
@@ -142,6 +171,10 @@ class COGenerator:
                 created_cos.append(co)
 
             gen_run.status = "COMPLETED"
+            gen_run.validation_result = {
+                "bloom_ordering": validation_result.to_dict(),
+                "was_reordered": not validation_result.is_valid,
+            }
             await self.db.commit()
             return created_cos
 

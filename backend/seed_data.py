@@ -3,8 +3,9 @@ ADAPT — Database Seeding Script
 
 Initializes the database with:
 1. Default Faculty User (faculty@university.edu / Password123!)
-2. NBA Program Outcomes (PO1-PO12 + PSO1-PSO2)
-3. Default Natural Language Processing subject with structured syllabus units
+2. NBA Program Outcomes (PO1-PO13 + PSO1-PSO2)
+3. Performance Indicators (3 per PO)
+4. Default Natural Language Processing subject with structured syllabus units
 """
 
 import asyncio
@@ -15,6 +16,7 @@ from app.database import async_session_factory, init_db
 from app.models.user import User
 from app.models.subject import Subject
 from app.models.program_outcome import ProgramOutcome
+from app.models.performance_indicator import PerformanceIndicator
 from app.models.syllabus import Syllabus, SyllabusUnit, Topic
 from app.models.exam import ExamBlueprint
 from app.core.security import hash_password
@@ -61,6 +63,39 @@ async def seed():
                         session.add(po_obj)
             await session.flush()
             print("Seeded standard NBA Program Outcomes.")
+
+        # 2b. Seed Performance Indicators
+        pi_path = Path("data/knowledge_base/performance_indicators.json")
+        if not pi_path.exists():
+            pi_path = Path("../data/knowledge_base/performance_indicators.json")
+        if pi_path.exists():
+            with open(pi_path, "r", encoding="utf-8") as f:
+                pi_data = json.load(f)
+                pi_items = pi_data.get("performance_indicators", [])
+                pi_count = 0
+                for item in pi_items:
+                    # Check if PI already exists
+                    existing = await session.execute(
+                        select(PerformanceIndicator).where(PerformanceIndicator.pi_code == item["pi_code"])
+                    )
+                    if existing.scalar_one_or_none():
+                        continue
+                    # Look up parent PO
+                    po_res = await session.execute(
+                        select(ProgramOutcome).where(ProgramOutcome.po_code == item["po_code"])
+                    )
+                    po_obj = po_res.scalar_one_or_none()
+                    if po_obj:
+                        pi_obj = PerformanceIndicator(
+                            po_id=po_obj.id,
+                            pi_code=item["pi_code"],
+                            statement=item["statement"],
+                            is_active=True,
+                        )
+                        session.add(pi_obj)
+                        pi_count += 1
+                await session.flush()
+                print(f"Seeded {pi_count} Performance Indicators.")
 
         # 3. Seed Sample Subject: Natural Language Processing
         sub_res = await session.execute(select(Subject).where(Subject.course_code == "CS602"))

@@ -60,6 +60,11 @@
     "category": "PO"
   },
   {
+    "po_code": "PO13",
+    "statement": "Research and Innovation: Engage in research, experimentation, and innovation to contribute to the advancement of engineering knowledge and practice through original thinking and creative problem-solving.",
+    "category": "PO"
+  },
+  {
     "po_code": "PSO1",
     "statement": "Core Domain Expertise: Apply domain-specific principles, algorithms, and architectures to construct robust and scalable computing systems.",
     "category": "PSO"

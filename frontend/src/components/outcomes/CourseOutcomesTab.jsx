@@ -27,7 +27,7 @@ export const CourseOutcomesTab = ({ subject }) => {
 
   const handleGenerate = async () => {
     try {
-      const res = await api.post(`/subjects/${subject.id}/course-outcomes/generate`, { num_cos: 5 });
+      const res = await api.post(`/subjects/${subject.id}/course-outcomes/generate`, { num_cos: 6 });
       setTaskId(res.data.task_id);
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to start generation');

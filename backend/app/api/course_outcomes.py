@@ -145,3 +145,31 @@ async def approve_all_course_outcomes(
 
     await db.commit()
     return await list_course_outcomes(subject_id, db, current_user)
+
+@router.delete('/api/course-outcomes/{co_id}', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_course_outcome(
+    co_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res = await db.execute(select(CourseOutcome).where(CourseOutcome.id == co_id))
+    co = res.scalar_one_or_none()
+    if not co:
+        raise HTTPException(status_code=404, detail='Course Outcome not found')
+    await db.delete(co)
+    await db.commit()
+    return None
+
+
+@router.delete('/api/subjects/{subject_id}/course-outcomes', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_course_outcomes(
+    subject_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    res = await db.execute(select(CourseOutcome).where(CourseOutcome.subject_id == subject_id))
+    cos = res.scalars().all()
+    for co in cos:
+        await db.delete(co)
+    await db.commit()
+    return None

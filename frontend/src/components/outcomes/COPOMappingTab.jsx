@@ -8,10 +8,14 @@ export const COPOMappingTab = ({ subject }) => {
   const [loading, setLoading] = useState(true);
   const [taskId, setTaskId] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
+  const [viewMode, setViewMode] = useState('direct'); // 'direct' | 'derived'
 
   const fetchMatrix = async () => {
     try {
-      const res = await api.get(`/subjects/${subject.id}/co-po`);
+      const endpoint = viewMode === 'derived'
+        ? `/subjects/${subject.id}/co-po/derived`
+        : `/subjects/${subject.id}/co-po`;
+      const res = await api.get(endpoint);
       setMatrixData(res.data);
     } catch (e) {
       console.error(e);
@@ -22,7 +26,7 @@ export const COPOMappingTab = ({ subject }) => {
 
   useEffect(() => {
     fetchMatrix();
-  }, [subject.id]);
+  }, [subject.id, viewMode]);
 
   const handleGenerate = async () => {
     try {
@@ -75,6 +79,18 @@ export const COPOMappingTab = ({ subject }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex bg-slate-800 rounded-xl p-0.5 mr-2">
+            <button
+              onClick={() => setViewMode('direct')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${viewMode === 'direct' ? 'bg-brand-500 text-white' : 'text-slate-400 hover:text-white'}`}>
+              Direct
+            </button>
+            <button
+              onClick={() => setViewMode('derived')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${viewMode === 'derived' ? 'bg-purple-500 text-white' : 'text-slate-400 hover:text-white'}`}>
+              Derived (LO→PI→PO)
+            </button>
+          </div>
           {matrixData && Object.keys(matrixData.matrix || {}).length > 0 && (
             <button
               onClick={handleApproveAll}

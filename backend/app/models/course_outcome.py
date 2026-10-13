@@ -31,6 +31,9 @@ class CourseOutcome(Base):
     bloom_level: Mapped[str] = mapped_column(
         String(20), nullable=True
     )  # Remember | Understand | Apply | Analyze | Evaluate | Create
+    bloom_order: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # 1=Remember, 2=Understand, 3=Apply, 4=Analyze, 5=Evaluate, 6=Create
     bloom_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     bloom_model_used: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     supporting_units: Mapped[dict] = mapped_column(JSON, nullable=True, default=list)
@@ -59,6 +62,9 @@ class CourseOutcome(Base):
     generation_run = relationship("GenerationRun", lazy="selectin")
     co_po_mappings = relationship(
         "COPOMapping", back_populates="course_outcome", lazy="selectin"
+    )
+    lo_mappings = relationship(
+        "LOCOMapping", back_populates="course_outcome", lazy="selectin"
     )
 
     def __repr__(self) -> str:
